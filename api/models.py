@@ -110,7 +110,7 @@ class CustomUserManager(BaseUserManager):
             user_type = CustomUser.STUDENT
         extra_fields = self.check_type(user_type, **extra_fields)
         extra_fields.setdefault('user_type', user_type)
-        extra_fields.setdefault('is_active', False)
+        extra_fields.setdefault('is_active', True)
         user = self.model(email=email, **extra_fields)
         user.set_password(password)
         user.save(using=self._db)
