@@ -2,7 +2,6 @@
 Django settings for lightecfa project.
 """
 
-import dj_database_url
 from dotenv import load_dotenv
 from corsheaders.defaults import default_headers
 from datetime import timedelta
@@ -15,7 +14,7 @@ load_dotenv()
 
 SECRET_KEY = os.getenv('SECRET_KEY')
 
-DEBUG = True if os.getenv('DEBUG').lower() == "true" else False
+DEBUG = True
 
 ALLOWED_HOSTS = ['*']
 
@@ -100,29 +99,17 @@ SIMPLE_JWT = {
     'AUTH_HEADER_TYPES': (*default_headers, 'Bearer'),
 }
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR.parent / 'db.sqlite3',
-    }
-}
-
 DATABASES = {}
 
-if DEBUG == False:
-    print("Using production database...")
-    DATABASES['default'] = dj_database_url.config(
-        default=os.getenv('DATABASE_URL'),
-        conn_max_age=600,
-        conn_health_checks=True,
-    )
-else:
-    print("Using development database...")
-    DATABASES['default'] = {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
 
+DATABASES['default'] = {
+    'ENGINE': 'django.db.backends.postgresql_psycopg2',
+    'NAME': os.getenv('PGDATABASE'),
+    'USER': os.getenv('PGUSER'),
+    'PASSWORD': os.getenv('PGPASSWORD'),
+    'HOST': os.getenv('PGHOST'),
+    'PORT': os.getenv('PGPORT'),
+}
 
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -156,15 +143,15 @@ USE_TZ = True
 # }
 
 
-STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+STATIC_ROOT = os.path.join(BASE_DIR.parent, 'staticfiles')
 STATIC_URL = '/static/'
 
 STATICFILES_DIRS = [
-    os.path.join(BASE_DIR, 'static'),
+    os.path.join(BASE_DIR.parent, 'static'),
 ]
 
 MEDIA_URL = '/media/'
-MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+MEDIA_ROOT = os.path.join(BASE_DIR.parent, 'media')
 
 
 # Default primary key field type

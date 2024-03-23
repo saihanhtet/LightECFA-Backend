@@ -34,12 +34,18 @@ class UserLoginSerializer(serializers.Serializer):
     password = serializers.CharField()
 
     def check_user(self, clean_data):
-        email = clean_data['email']
+        email = clean_data['email'].lower()
         password = clean_data['password']
-        user = authenticate(username=email, password=password)
-        if not user:
-            raise ValueError("User does not exist!")
-        return user
+
+        try:
+            obj = CustomUser.objects.get(email=email)
+        except CustomUser.DoesNotExist:
+            raise serializers.ValidationError("User does not exist!")
+
+        if not check_password(password, obj.password):
+            raise serializers.ValidationError("Invalid password!")
+
+        return obj
 
 
 class AdminProfileSerializer(serializers.ModelSerializer):
