@@ -1,0 +1,22 @@
+fake_students.json
+# Ignore .env file
+.env
+.env/
+.venv/
+env/
+venv/
+*.env
+
+# Ignore db.sqlite3 file
+db.sqlite3
+
+# Ignore Python cache directories
+__pycache__/
+*.pyc
+
+
+staticfiles/
+.vercel
+
+api/migrations/*
+!api/migrations/__init__.py
