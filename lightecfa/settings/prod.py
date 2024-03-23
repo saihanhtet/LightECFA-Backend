@@ -2,6 +2,7 @@
 Django settings for lightecfa project.
 """
 
+import dj_database_url
 from dotenv import load_dotenv
 from corsheaders.defaults import default_headers
 from datetime import timedelta
@@ -102,14 +103,11 @@ SIMPLE_JWT = {
 DATABASES = {}
 
 
-DATABASES['default'] = {
-    'ENGINE': 'django.db.backends.postgresql_psycopg2',
-    'NAME': os.getenv('PGDATABASE'),
-    'USER': os.getenv('PGUSER'),
-    'PASSWORD': os.getenv('PGPASSWORD'),
-    'HOST': os.getenv('PGHOST'),
-    'PORT': os.getenv('PGPORT'),
-}
+DATABASES['default'] = dj_database_url.config(
+    default=os.getenv('DATABASE_URL'),
+    conn_max_age=600,
+    conn_health_checks=True,
+)
 
 AUTH_PASSWORD_VALIDATORS = [
     {
