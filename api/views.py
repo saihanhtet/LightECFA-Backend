@@ -1,3 +1,11 @@
+from django.core.mail import EmailMultiAlternatives, get_connection
+import requests
+from email import encoders
+from email.mime.base import MIMEBase
+from django.utils.timezone import now
+from django.core.mail import EmailMultiAlternatives
+import secrets
+import string
 from django.utils.timezone import make_aware
 from datetime import datetime, date
 from openpyxl import Workbook
@@ -62,6 +70,18 @@ def generate_tokens(user):
     }
 
 
+def EmailSender(subject, message, from_email, recipient_list, auth_user, auth_password):
+    return send_mail(
+        subject,
+        message,
+        from_email=from_email,
+        recipient_list=recipient_list,
+        auth_user=auth_user,
+        auth_password=auth_password,
+        fail_silently=False,
+    )
+
+
 def ResponseFunction(data, message, status, **args):
     """ Default reponse function layout """
     return Response({'data': data, **args, 'message': str(message)}, status=status)
@@ -90,6 +110,21 @@ def addCookies(response: Response, tokens):
         path='/',
     )
     return response
+
+
+def GeneratePassword():
+    characters = string.ascii_letters + string.digits + string.punctuation
+    password = ''.join(secrets.choice(characters) for _ in range(10))
+    return password
+
+
+def checkUserExist(email):
+    try:
+        user_obj = UserModel.objects.get(email=email)
+        print(user_obj)
+        return True
+    except Exception as e:
+        return False
 
 
 class IsSuperuser(permissions.BasePermission):
@@ -164,20 +199,73 @@ class ScheduledInvoiceMailDetail(RetrieveUpdateDestroyAPIView):
     authentication_classes = [JWTAuthentication]
 
 
+class ScheduledInvoiceMailSend(RetrieveUpdateDestroyAPIView):
+    queryset = ScheduledInvoiceMail.objects.all()
+    serializer_class = ScheduledInvoiceMailSerializer
+    permission_classes = (permissions.IsAuthenticated,)
+    authentication_classes = [JWTAuthentication]
+
+    def post(self, request, pk):
+        instance = self.get_object()
+        invoice_serializer = self.serializer_class(instance).data
+
+        data = EmailCredentials.objects.first()
+        serializer = EmailCredentialsSerializer(data).data
+        auth_user = serializer['email']
+        auth_password = serializer['password']
+        subject = invoice_serializer.get('subject')
+        message = invoice_serializer.get('message')
+        students = CustomUser.objects.filter(user_type='student')
+        students = students.filter(
+            studentprofile__cohort__course_id=invoice_serializer.get('course'))
+        recipient_list = []
+        attachment_response = requests.get(
+            invoice_serializer.get('attachment'))
+
+        for student in students:
+            recipient_list.append(student.email)
+
+        if len(recipient_list) == 0:
+            return Response({'message': 'No Student for that course'}, status=status.HTTP_200_OK)
+        print(recipient_list)
+        if attachment_response.status_code == 200:
+            email_message = EmailMultiAlternatives(
+                subject=subject,
+                body=message,
+                from_email=auth_user,
+                to=recipient_list,
+            )
+
+            attachment_content = attachment_response.content
+            attachment_name = 'invoice.pdf'
+            part = MIMEBase('application', 'octet-stream')
+            part.set_payload(attachment_content)
+            encoders.encode_base64(part)
+            part.add_header('Content-Disposition',
+                            f'attachment; filename="{attachment_name}"')
+
+            email_message.attach(part)
+
+            email_message.connection = get_connection(
+                username=auth_user,
+                password=auth_password,
+                fail_silently=False,
+            )
+
+            try:
+                email_message.send(fail_silently=False)
+                return Response({'message': 'Email sent successfully'}, status=status.HTTP_200_OK)
+            except Exception as e:
+                return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            return Response({'message': 'Failed to fetch attachment from URL:'}, status=status.HTTP_200_OK)
+
+
 class InvoiceFileUploadDetail(RetrieveUpdateDestroyAPIView):
     queryset = Invoice.objects.all()
     serializer_class = InvoiceSerializer
     permission_classes = (permissions.IsAuthenticated,)
     authentication_classes = [JWTAuthentication]
-
-
-def checkUserExist(email):
-    try:
-        user_obj = UserModel.objects.get(email=email)
-        print(user_obj)
-        return True
-    except Exception as e:
-        return False
 
 
 class EmailCredentialsDetailView(APIView):
@@ -207,36 +295,13 @@ class EmailCredentialsDetailView(APIView):
         else:
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+# ======================== Register & Login View
+
 
 class StudentRegisterView(APIView):
     """ View for creating students """
     serializer_class = StudentRegisterSerializer
-    permission_classes = (permissions.AllowAny,)
-    # authentication_classes = [JWTAuthentication]
-
-    def get(self, request):
-        serializer = self.serializer_class()
-        return Response(serializer.data)
-
-    def post(self, request):
-        clean_data = request.data
-        exists = checkUserExist(clean_data['email'])
-        if exists:
-            return Response({'data': {}, 'message': 'User with this Email Exist'}, status=status.HTTP_226_IM_USED)
-        serializer = StudentRegisterSerializer(data=clean_data)
-        if serializer.is_valid(raise_exception=True):
-            user = serializer.create(clean_data)
-            user = UserModel.objects.get(id=user.id)
-            serializer = UserDetailSerializer(user)
-            if user:
-                return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response({"data": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
-
-
-class TeacherRegisterView(APIView):
-    """ View for creating teacher """
-    serializer_class = TeacherRegisterSerializer
-    permission_classes = (permissions.AllowAny,)
+    permission_classes = (permissions.IsAuthenticated, IsSuperuser, )
     authentication_classes = [JWTAuthentication]
 
     def get(self, request):
@@ -244,7 +309,52 @@ class TeacherRegisterView(APIView):
         return Response(serializer.data)
 
     def post(self, request):
-        clean_data = request.data
+        clean_data = request.data.copy()
+        clean_data['password'] = str(GeneratePassword())
+        cohort_id = int(clean_data['cohort'][0])
+        try:
+            cohort = Cohort.objects.get(pk=cohort_id)
+            course = cohort.course
+        except Cohort.DoesNotExist:
+            pass
+        exists = checkUserExist(clean_data['email'])
+        if exists:
+            return Response({'data': {}, 'message': 'User with this Email Exist'}, status=status.HTTP_226_IM_USED)
+        serializer = StudentRegisterSerializer(data=clean_data)
+        if serializer.is_valid(raise_exception=True):
+            user = serializer.create(clean_data)
+            enrolled_course = course
+            subject = "Welcome to Light English Class For All!"
+            user = UserModel.objects.get(id=user.id)
+            serializer = UserDetailSerializer(user)
+            email_data = EmailCredentials.objects.first()
+            email_serializer = EmailCredentialsSerializer(email_data).data
+            from_email = email_serializer['email']
+            auth_password = email_serializer['password']
+            subject = 'Hello'
+            message = 'Here is the testing from django.'
+            recipient_list = [serializer.data['email']]
+            if user:
+                EmailSender(subject, message, from_email,
+                            recipient_list, from_email, auth_password)
+                return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return Response({"data": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"data": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class TeacherRegisterView(APIView):
+    """ View for creating teacher """
+    serializer_class = TeacherRegisterSerializer
+    permission_classes = (permissions.IsAuthenticated, IsSuperuser, )
+    authentication_classes = [JWTAuthentication]
+
+    def get(self, request):
+        serializer = self.serializer_class()
+        return Response(serializer.data)
+
+    def post(self, request):
+        clean_data = request.data.copy()
+        clean_data['password'] = str(GeneratePassword())
         exists = checkUserExist(clean_data['email'])
         if exists:
             return Response({'data': {}, 'message': 'User with this Email Exist'}, status=status.HTTP_226_IM_USED)
@@ -253,55 +363,24 @@ class TeacherRegisterView(APIView):
             user = serializer.create(clean_data)
             user = UserModel.objects.get(id=user.id)
             serializer = UserDetailSerializer(user)
+            email_data = EmailCredentials.objects.first()
+            email_serializer = EmailCredentialsSerializer(email_data).data
+            from_email = email_serializer['email']
+            auth_password = email_serializer['password']
+            subject = 'Welcome from Light English Class For All'
+            message = f"Here is your credentials to login: \n Email: {clean_data['email']} ,\n Password: {clean_data['password']}"
+            recipient_list = [serializer.data['email']]
             if user:
+                EmailSender(subject, message, from_email,
+                            recipient_list, from_email, auth_password)
                 return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(status=status.HTTP_400_BAD_REQUEST)
-
-
-class TeacherProfileDetailView(RetrieveUpdateDestroyAPIView):
-    serializer_class = TeacherProfileSerializer
-    permission_classes = [permissions.IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
-
-    def get_queryset(self):
-        user_id = self.kwargs['pk']
-        queryset = TeacherProfile.objects.filter(user=user_id)
-        return queryset
-
-    def get(self, request, *args, **kwargs):
-        queryset = self.get_queryset()
-        if queryset.exists():
-            instance = queryset.first()
-            serializer = self.serializer_class(instance)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        else:
-            return Response({"detail": "TeacherProfile not found for the given user ID."}, status=status.HTTP_404_NOT_FOUND)
-
-
-class StudentProfileDetailView(RetrieveUpdateDestroyAPIView):
-    serializer_class = StudentProfileSerializer
-    permission_classes = [permissions.IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
-
-    def get_queryset(self):
-        user_id = self.kwargs['pk']
-        queryset = StudentProfile.objects.filter(user=user_id)
-        return queryset
-
-    def get(self, request, *args, **kwargs):
-        queryset = self.get_queryset()
-        if queryset.exists():
-            instance = queryset.first()
-            serializer = self.serializer_class(instance)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        else:
-            return Response({"detail": "StudentProfile not found for the given user ID."}, status=status.HTTP_404_NOT_FOUND)
 
 
 class AdminRegisterView(APIView):
     """ View for creating admin """
     serializer_class = AdminRegisterSerializer
-    permission_classes = (permissions.AllowAny,)
+    permission_classes = (permissions.IsAuthenticated, IsSuperuser, )
     authentication_classes = [JWTAuthentication]
 
     def get(self, request):
@@ -309,7 +388,8 @@ class AdminRegisterView(APIView):
         return Response(serializer.data)
 
     def post(self, request):
-        clean_data = request.data
+        clean_data = request.data.copy()
+        clean_data['password'] = str(GeneratePassword())
         exists = checkUserExist(clean_data['email'])
         if exists:
             return Response({'data': {}, 'message': 'User with this Email Exist'}, status=status.HTTP_226_IM_USED)
@@ -318,7 +398,16 @@ class AdminRegisterView(APIView):
             user = serializer.create(clean_data)
             user = UserModel.objects.get(id=user.id)
             serializer = UserDetailSerializer(user)
+            email_data = EmailCredentials.objects.first()
+            email_serializer = EmailCredentialsSerializer(email_data).data
+            from_email = email_serializer['email']
+            auth_password = email_serializer['password']
+            subject = 'Welcome from Light English Class For All'
+            message = f"Here is your credentials to login: \n Email: {clean_data['email']} ,\n Password: {clean_data['password']}"
+            recipient_list = [serializer.data['email']]
             if user:
+                EmailSender(subject, message, from_email,
+                            recipient_list, from_email, auth_password)
                 return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(status=status.HTTP_400_BAD_REQUEST)
 
@@ -381,6 +470,42 @@ class LogoutView(APIView):
         response.delete_cookie('access_token')
         return response
 
+# ======================== Profile View
+
+
+class TeacherProfileDetailView(RetrieveUpdateDestroyAPIView):
+    queryset = TeacherProfile.objects.all()
+    serializer_class = TeacherProfileSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
+
+class StudentProfileDetailView(RetrieveUpdateDestroyAPIView):
+    serializer_class = StudentProfileSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
+    def get_queryset(self):
+        user_id = self.kwargs['pk']
+        queryset = StudentProfile.objects.filter(user=user_id)
+        return queryset
+
+    def get(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        if queryset.exists():
+            instance = queryset.first()
+            serializer = self.serializer_class(instance)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        else:
+            return Response({"detail": "StudentProfile not found for the given user ID."}, status=status.HTTP_404_NOT_FOUND)
+
+
+class AdminProfileDetailView(RetrieveUpdateDestroyAPIView):
+    queryset = AdminProfile.objects.all()
+    serializer_class = AdminProfileSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
 
 class UserTypeChangeView(APIView):
     serializer_class = UserTypeChangeSerializer
@@ -401,7 +526,7 @@ class UserDetailView(RetrieveUpdateDestroyAPIView):
     """
     queryset = UserModel.objects.all()
     serializer_class = UserDetailSerializer
-    permission_classes = (permissions.AllowAny,)
+    permission_classes = (permissions.IsAuthenticated,)
 
     def get(self, request, *args, **kwargs):
         """ User Details get method """
@@ -507,7 +632,7 @@ class UserListView(APIView):
     View for retrieving user data.
     """
     serializer_class = UserDetailSerializer
-    permission_classes = (permissions.AllowAny,)
+    permission_classes = (permissions.IsAuthenticated,)
 
     def get(self, request, user_type=None):
         if user_type:
@@ -521,10 +646,12 @@ class UserListView(APIView):
         serializer = self.serializer_class(all_user, many=True)
         return Response({'data': serializer.data, 'message': message}, status=status.HTTP_200_OK)
 
+# ======================== Others View
+
 
 class SubjectView(APIView):
     serializer_class = SubjectDetailSerializer
-    permission_classes = (permissions.AllowAny,)
+    permission_classes = (permissions.IsAuthenticated,)
 
     def get(self, request):
         subjects = Subject.objects.all()
@@ -545,12 +672,12 @@ class SubjectView(APIView):
 class SubjectDetailView(RetrieveUpdateDestroyAPIView):
     queryset = Subject.objects.all()
     serializer_class = SubjectDetailSerializer
-    permission_classes = (permissions.AllowAny,)
+    permission_classes = (permissions.IsAuthenticated,)
 
 
 class CourseView(APIView):
     serializer_class = CourseDetailSerializer
-    permission_classes = (permissions.AllowAny,)
+    permission_classes = (permissions.IsAuthenticated,)
 
     def get(self, request):
         courses = Course.objects.all()
@@ -571,12 +698,12 @@ class CourseView(APIView):
 class CourseDetailView(RetrieveUpdateDestroyAPIView):
     queryset = Course.objects.all()
     serializer_class = CourseDetailSerializer
-    permission_classes = (permissions.AllowAny,)
+    permission_classes = (permissions.IsAuthenticated,)
 
 
 class CohortView(APIView):
     serializer_class = CohortDetailSerializer
-    permission_classes = (permissions.AllowAny,)
+    permission_classes = (permissions.IsAuthenticated,)
 
     def get(self, request):
         cohorts = Cohort.objects.all()
@@ -597,12 +724,12 @@ class CohortView(APIView):
 class CohortDetailView(RetrieveUpdateDestroyAPIView):
     queryset = Cohort.objects.all()
     serializer_class = CohortDetailSerializer
-    permission_classes = (permissions.AllowAny, )
+    permission_classes = (permissions.IsAuthenticated, )
 
 
 class AttendanceView(APIView):
     serializer_class = AttendanceSerializer
-    permission_classes = (permissions.AllowAny,)
+    permission_classes = (permissions.IsAuthenticated,)
 
     def get(self, request):
         return Response({'data': "", "message": "Successfully got the attendance"}, status=status.HTTP_200_OK)
@@ -646,11 +773,17 @@ class Dashboard(APIView):
         subjects = Subject.objects.all()
         cohorts = Cohort.objects.all()
         invoice = Invoice.objects.all()
+        tests = TestModel.objects.all()
+        test_reports = TestStudentReport.objects.all()
 
         courses_serializer = CourseDetailSerializer(courses, many=True).data
         subjects_serializer = SubjectDetailSerializer(subjects, many=True).data
         cohorts_serializer = CohortDetailSerializer(cohorts, many=True).data
         invoice_serializer = InvoiceSerializer(invoice, many=True).data
+
+        tests_serializer = TestModelSerializer(tests, many=True).data
+        test_reports_serializer = TestStudentReportSerilizer(
+            test_reports, many=True).data
 
         invoice_mails = ScheduledInvoiceMail.objects.all()
         invoice_serializers = ScheduledInvoiceMailSerializer(
@@ -682,6 +815,8 @@ class Dashboard(APIView):
             "subjects_count": subjects.count(),
             "cohorts_count": cohorts.count(),
             "invoice_schedule": invoice_serializers,
+            "tests": tests_serializer,
+            "test_reports": test_reports_serializer,
             "default_mail": email_serializer[0],
         }
 
@@ -727,7 +862,58 @@ class SendEmailView(APIView):
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
+class TestMakerView(APIView):
+    serializer_class = TestModelSerializer
+    permission_classes = (permissions.IsAuthenticated, IsSuperuser, )
+
+    def get(self, request):
+        test = TestModel.objects.all()
+        serializer = self.serializer_class(test, many=True)
+        if not test.exists():
+            return Response({'data': serializer.data, 'message': "No test."}, status=status.HTTP_200_OK)
+        return Response({'data': serializer.data, 'message': "Successfully retrieved Test."}, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        serializer = self.serializer_class(data=request.data)
+        if serializer.is_valid(raise_exception=True):
+            serializer.save()
+            return Response({'data': serializer.data, 'message': 'Successfully inserted new test'}, status=status.HTTP_201_CREATED)
+        return Response({'data': "", "message": "Please fill all the input"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class TestMakerDetailView(RetrieveUpdateDestroyAPIView):
+    queryset = TestModel.objects.all()
+    serializer_class = TestModelSerializer
+    permission_classes = (permissions.IsAuthenticated, IsSuperuser, )
+
+
+class TestReportView(APIView):
+    serializer_class = TestStudentReportSerilizer
+    permission_classes = (permissions.IsAuthenticated, IsSuperuser, )
+
+    def get(self, request):
+        test_report = TestStudentReport.objects.all()
+        serializer = self.serializer_class(test_report, many=True)
+
+        if not test_report.exists():
+            return Response({'data': serializer.data, 'message': "No test report."}, status=status.HTTP_200_OK)
+        return Response({'data': serializer.data, 'message': "Successfully retrieved Test."}, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        serializer = self.serializer_class(data=request.data)
+        if serializer.is_valid(raise_exception=True):
+            serializer.save()
+            return Response({'data': serializer.data, 'message': 'Successfully inserted new test report'}, status=status.HTTP_201_CREATED)
+        return Response({'data': "", "message": "Please fill all the input"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class TestReportDetailView(RetrieveUpdateDestroyAPIView):
+    queryset = TestStudentReport.objects.all()
+    serializer_class = TestStudentReportSerilizer
+    permission_classes = (permissions.IsAuthenticated, IsSuperuser, )
 # excels
+
+
 class AdminUserExcelView(APIView):
     permission_classes = (permissions.IsAuthenticated, IsSuperuser,)
     authentication_classes = [JWTAuthentication]

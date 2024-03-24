@@ -100,6 +100,17 @@ class EmailCredentials(models.Model):
         return self.email
 
 
+class EmailTemplates(models.Model):
+    id = models.AutoField(primary_key=True)
+    title = models.CharField(max_length=255)
+    subject = models.CharField(max_length=255)
+    message = models.TextField(null=False)
+    objects = models.Manager()
+
+    def __str__(self) -> str:
+        return self.title
+
+
 class CustomUserManager(BaseUserManager):
     def create_user(self, email, password=None, user_type=None, **extra_fields):
         """ Create and return a regular user with an email and password. """
@@ -300,7 +311,7 @@ class ScheduledInvoiceMail(models.Model):
     email = models.EmailField()
     subject = models.CharField(max_length=255)
     message = models.TextField()
-    scheduled_date = models.DateTimeField()
+    scheduled_date = models.DateField()
     paidStudents = models.ManyToManyField(
         CustomUser, blank=True)
     course = models.ForeignKey(Course, on_delete=models.DO_NOTHING)
@@ -389,6 +400,32 @@ class NotificationTeacher(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now_add=True)
     objects = models.Manager()
+
+
+class TestModel(models.Model):
+    id = models.AutoField(primary_key=True)
+    test_name = models.CharField(max_length=255, default='')
+    subject = models.ForeignKey(Subject, on_delete=models.DO_NOTHING)
+    course = models.ForeignKey(Course, on_delete=models.DO_NOTHING)
+    attachment = models.FileField(
+        upload_to='test_files/', blank=True, null=True)
+    date = models.DateField()
+    objects = models.Manager()
+
+    def __str__(self) -> str:
+        return self.test_name
+
+
+class TestStudentReport(models.Model):
+    id = models.AutoField(primary_key=True)
+    course = models.ForeignKey(Course, on_delete=models.DO_NOTHING)
+    test = models.ForeignKey(TestModel, on_delete=models.DO_NOTHING)
+    json = models.JSONField(null=True)
+
+    objects = models.Manager()
+
+    def __str__(self) -> str:
+        return self.course + "-" + self.test
 
 
 def change_user_type(user, new_user_type):

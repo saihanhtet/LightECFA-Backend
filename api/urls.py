@@ -46,6 +46,8 @@ urlpatterns = [
     # admin urls
     path('admin/create', views.AdminRegisterView.as_view(),
          name="admin-create"),
+    path('admin/<int:pk>', views.AdminProfileDetailView.as_view(),
+         name="admin-update"),
 
     path('dashboard', views.Dashboard.as_view(), name='dashboard'),
 
@@ -61,9 +63,11 @@ urlpatterns = [
          name="schedule-invoice-detail"),
 
 
-    path('send-email/all', views.SendEmailView.as_view(), name="send-email"),
+    path('send-email/all', views.SendEmailView.as_view(), name="send-email-all"),
     path('email-credentials',
          views.EmailCredentialsDetailView.as_view(), name="email-credentials"),
+    path('send-email/<int:pk>',
+         views.ScheduledInvoiceMailSend.as_view(), name="send-email"),
 
     # excels
     path('excel/admin',
@@ -72,4 +76,14 @@ urlpatterns = [
          views.TeacherUserExcelView.as_view(), name="excel-teacher"),
     path('excel/student',
          views.StudentUserExcelView.as_view(), name="excel-student"),
+
+    # test
+    path('test/',
+         views.TestMakerView.as_view(), name="test-view"),
+    path('test/report',
+         views.TestMakerDetailView.as_view(), name="test-report"),
+    path('test/<int:pk>',
+         views.TestMakerDetailView.as_view(), name="test-detail"),
+    path('test/report/<int:pk>',
+         views.TestReportDetailView.as_view(), name="test-report-detail"),
 ]

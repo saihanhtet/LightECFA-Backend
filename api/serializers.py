@@ -47,6 +47,8 @@ class UserLoginSerializer(serializers.Serializer):
 
         return obj
 
+# profile serializer
+
 
 class AdminProfileSerializer(serializers.ModelSerializer):
     class Meta:
@@ -104,6 +106,8 @@ class UserDetailSerializer(serializers.ModelSerializer):
             data.pop('student_profile')
 
         return data
+
+# user type register serializer
 
 
 class TeacherRegisterSerializer(serializers.ModelSerializer):
@@ -281,6 +285,8 @@ class StudentRegisterSerializer(serializers.ModelSerializer):
         user_data = UserDetailSerializer(user_obj).data
         return user_obj
 
+# user type changer
+
 
 class UserTypeChangeSerializer(serializers.ModelSerializer):
     _id = serializers.IntegerField(write_only=True)
@@ -315,6 +321,8 @@ class UserTypeChangeSerializer(serializers.ModelSerializer):
         instance.user_type = user_type
         instance.save()
         return instance
+
+# others
 
 
 class CourseDetailSerializer(serializers.ModelSerializer):
@@ -352,7 +360,8 @@ class InvoiceSerializer(serializers.ModelSerializer):
 class ScheduledInvoiceMailSerializer(serializers.ModelSerializer):
     class Meta:
         model = ScheduledInvoiceMail
-        fields = ('__all__')
+        fields = ['id', 'email', 'subject', 'message',
+                  'scheduled_date', 'course', 'sent', 'attachment']
 
 
 class EmailCredentialsSerializer(serializers.ModelSerializer):
@@ -447,3 +456,15 @@ class NotificationTeacherSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         return super().create(validated_data)
+
+
+class TestModelSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TestModel
+        fields = ('__all__')
+
+
+class TestStudentReportSerilizer(serializers.ModelSerializer):
+    class Meta:
+        models = TestStudentReport
+        fields = ('__all__')

@@ -6,9 +6,11 @@ django-cors-headers==3.13.0
 django-storages==1.14.2
 djangorestframework==3.14.0
 djangorestframework-simplejwt==5.3.1
+django-extensions==3.2.3
 gunicorn==21.2.0
 openpyxl==3.1.2
 pillow==10.2.0
 psycopg2-binary==2.9.9
 python-dotenv==1.0.0
 requests==2.31.0
+graphviz==0.20.3

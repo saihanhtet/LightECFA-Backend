@@ -1,0 +1,1 @@
+python .\manage.py graph_models -a > erd.dot --settings=lightecfa.settings.dev && python manage.py graph_models --pydot -a -g -o erd.png --settings=lightecfa.settings.dev
